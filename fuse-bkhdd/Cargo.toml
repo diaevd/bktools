@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Evgeny Duzhakov <diaevd@gmail.com>"]
 homepage = "https://github.com/diaevd/bktools"
 documentation = "https://github.com/diaevd/bktools/README.ru.md"
+description = "Fuse driver and cli for mount BK HDD images"
 license = "MIT OR Apache-2.0"
 readme = "../README.md"
 #ipublish = false
