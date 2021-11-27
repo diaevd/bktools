@@ -6,7 +6,8 @@ authors = ["Evgeny Duzhakov <diaevd@gmail.com>"]
 homepage = "https://github.com/diaevd/bktools"
 documentation = "https://github.com/diaevd/bktools/README.ru.md"
 license = "MIT OR Apache-2.0"
-publish = false
+readme = "../README.md"
+#ipublish = false
 
 [lib]
 doctest = false
