@@ -1,0 +1,14 @@
+[package]
+name = "bkhdd"
+version = "0.1.0"
+edition = "2021"
+authors = ["Evgeny Duzhakov <diaevd@gmail.com>"]
+homepage = "https://github.com/diaevd/bktools"
+documentation = "https://github.com/diaevd/bktools/README.ru.md"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+doctest = false
+
+[dependencies]
