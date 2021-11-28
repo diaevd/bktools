@@ -6,7 +6,7 @@ members = ["bkhdd/", "fuse-bkhdd/", "mkdosfs/", "fuse-mkdosfs/"]
 #debug = 0
 
 [profile.dev.package]
-#
+backtrace.opt-level = 3
 
 [profile.release]
 incremental = true
