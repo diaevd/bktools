@@ -14,10 +14,9 @@ readme = "../README.md"
 doctest = false
 
 [dependencies]
-bytes = "1.1.0"
+mkdosfs = { path = "../mkdosfs" }
 clap = "2.33.3"
 color-eyre = "0.5.11"
-encoding_rs = "0.8.29"
 eyre = "0.6.5"
 fuser = "0.9.1"
 libc = "0.2.107"
@@ -26,5 +25,5 @@ time = { version = "0.3.5", features = [ "macros" ] }
 tracing = "0.1.29"
 tracing-subscriber = { version = "0.3.1", features = [ "env-filter" ] }
 
-[profile.dev.package.backtrace]
-opt-level = 3
+#[profile.dev.package.backtrace]
+#opt-level = 3
