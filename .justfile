@@ -2,4 +2,5 @@ default:
         @just -l
 
 publish *FLAGS:
-        cargo release --tag-prefix='' --no-push --no-tag {{FLAGS}}
+	cargo ws publish --no-individual-tags {{FLAGS}} patch
+
