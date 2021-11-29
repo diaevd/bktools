@@ -1,6 +1,6 @@
 [package]
 name = "fuse-mkdosfs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Evgeny Duzhakov <diaevd@gmail.com>"]
 homepage = "https://github.com/diaevd/bktools/"
