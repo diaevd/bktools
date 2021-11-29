@@ -14,7 +14,7 @@ readme = "../README.md"
 doctest = false
 
 [dependencies]
-mkdosfs = { path = "../mkdosfs" }
+mkdosfs = { path = "../mkdosfs", version = "0.2" }
 clap = "2.33.3"
 color-eyre = "0.5.11"
 eyre = "0.6.5"
