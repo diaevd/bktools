@@ -10,9 +10,7 @@ use std::{
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use bkhdd::HDILayout;
-
-const BLOCK_SIZE: u64 = 512;
+use bkhdd::{HDILayout, BLOCK_SIZE};
 
 fn main() -> Result<()> {
     setup_logging()?;
