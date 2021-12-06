@@ -1,5 +1,3 @@
-use std::ops::{self, Neg};
-
 use binrw::BinRead;
 use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg};
 use color_eyre::eyre::Result;
@@ -10,7 +8,9 @@ use std::{
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use bkhdd::{HDILayout, BLOCK_SIZE};
+use bkhdd::{
+    io::BinInvertedReader, AHDDLayout, HDILayout, AHDD_CYL_B, AHDD_LOGD_B, AHDD_PT_SEC, BLOCK_SIZE,
+};
 
 fn main() -> Result<()> {
     setup_logging()?;
@@ -33,18 +33,20 @@ fn main() -> Result<()> {
 
     let mut f = fs::File::open(image_name)?;
     f.seek(SeekFrom::Start(0))?;
-    let mut buf = vec![0u8; BLOCK_SIZE as usize];
-    f.read_exact(&mut buf)?;
-    println!("len: {}, {:x?}", buf.len(), buf);
-    let cs = buf[..511].iter().fold(0u8, |sum, &b| sum.wrapping_add(b));
-    println!("cs = {:x} cs_neg = {:x}", cs, -(cs as i8) as u8);
-    // buf.iter_mut().for_each(|b| *b = !*b);
-    // println!("{:x?}", buf);
-    let mut c = Cursor::new(&buf);
-    let ss = HDILayout::read(&mut c)?;
-    let mut c = Cursor::new(&buf);
+    let hdi = HDILayout::read(&mut f)?;
+    dbg!(&hdi);
+    let model = &hdi.model_name;
+    // model.iter().swap_pairs();
 
-    dbg!(ss);
+    let mut rr = BinInvertedReader::new(&mut f);
+    rr.seek(SeekFrom::Start(
+        ((AHDD_PT_SEC + 1) * BLOCK_SIZE + AHDD_LOGD_B) as u64,
+    ))?;
+
+    let ap_h = AHDDLayout::read(&mut rr)?;
+    dbg!(&ap_h);
+
+    // let mut c = Cursor::new(&buf);
 
     Ok(())
 }
