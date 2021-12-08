@@ -9,6 +9,10 @@ where
     pub fn new(reader: R) -> Self {
         Self(reader)
     }
+
+    pub fn into_inner(self) -> R {
+        self.0
+    }
 }
 
 impl<R: Read + Seek> Read for BinInvertedReader<R> {
@@ -23,25 +27,42 @@ impl<R: Read + Seek> Read for BinInvertedReader<R> {
 
 impl<R: Seek> Seek for BinInvertedReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        // Заглушка, я не знаю нахрена, возможно это и нужно
-        // для проверки типа (а ты сука жив?), но это лишний syscall
-        // так что лесом
-        if let SeekFrom::Current(n) = pos {
-            if n == 0 {
-                return self.0.stream_position();
-            }
-        }
-        eprintln!(
-            "< SEEK: {:?} / pos: {:?}",
-            self.0.stream_position().unwrap(),
-            pos,
-        );
-        let res = self.0.seek(pos);
-        eprintln!(
-            "> SEEK: {:?} / Res: {:?}",
-            self.0.stream_position().unwrap(),
-            res
-        );
-        res
+        self.0.seek(pos)
+    }
+}
+
+pub struct ReverseReader<R>(R);
+
+impl<R> ReverseReader<R>
+where
+    R: Read + Seek,
+{
+    pub fn new(reader: R) -> Self {
+        Self(reader)
+    }
+
+    pub fn into_inner(self) -> R {
+        self.0
+    }
+}
+
+impl<R: Read + Seek> Read for ReverseReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        eprintln!("< READ pos: {:?}", self.0.stream_position().unwrap());
+        let len = buf.len();
+        eprintln!("< READ len: {:?}", len);
+        let pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
+        eprintln!("< READ set new pos: {:?}", pos);
+        let size = self.0.read(buf)?;
+        eprintln!("> READ: {:?}", self.0.stream_position().unwrap());
+        let pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
+        eprintln!("> READ set new pos: {:?}", pos);
+        Ok(size)
+    }
+}
+
+impl<R: Seek> Seek for ReverseReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.0.seek(pos)
     }
 }
