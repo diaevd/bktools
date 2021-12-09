@@ -47,6 +47,26 @@ fn main() -> Result<()> {
                 .long("show-deleted")
                 .help("Enable show deleted files (files marked as deleted)"),
         )
+        .arg(
+            Arg::with_name("offset")
+                .long("offset")
+                .alias("base")
+                .short("o")
+                .default_value("0")
+                .takes_value(true)
+                .validator(|s| match s.parse::<u64>() {
+                    Ok(_n) => Ok(()),
+                    Err(e) => Err(format!("valuse must an integer: {}", e)),
+                })
+                .value_name("OFFSET")
+                .help("Offset from start of image in blocks"),
+        )
+        .arg(
+            Arg::with_name("inverted")
+                .long("use-inverted")
+                .short("i")
+                .help("Use inverted reader (used to read hdd images images)"),
+        )
         .get_matches();
 
     let imagename = matches.value_of("IMAGE_NAME").unwrap();
@@ -61,7 +81,7 @@ fn main() -> Result<()> {
 
     // fuser::mount2(Fs, mountpoint, &options).wrap_err("fuser::mount error")?;
     info!(?options, "Mount options: ");
-    let mut fs = FuseFs::new(imagename)?;
+    let mut fs = FuseFs::new(imagename);
 
     if matches.is_present("show-bad") {
         fs.show_bad(true);
@@ -69,8 +89,16 @@ fn main() -> Result<()> {
     if matches.is_present("show-deleted") {
         fs.show_deleted(true);
     }
+    if matches.is_present("inverted") {
+        fs.set_inverted(true);
+    }
+    if matches.is_present("offset") {
+        let offset = matches.value_of("offset").unwrap().parse::<u64>()?;
+        fs.set_offset(offset);
+    }
 
     info!("Starting");
+    fs.try_open()?;
     fuser::mount2(fs, mountpoint, &options).map_or_else(
         |e| match e.raw_os_error() {
             Some(0) => Ok(()),
