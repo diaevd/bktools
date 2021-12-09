@@ -2,18 +2,18 @@ use std::{
     fmt::Debug,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom},
-    os::unix::fs::{FileExt, MetadataExt},
+    os::unix::fs::MetadataExt,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use bytes::Buf;
 use encoding_rs::KOI8_R;
-use io::{BinInvertedReader, Reader};
+use io::Reader;
 use thiserror::Error;
-use tracing::{debug, instrument, trace, warn, Instrument};
+use tracing::{debug, instrument, trace, warn};
 
-mod io;
+pub mod io;
 
 pub const BLOCK_SIZE: usize = 512;
 pub const MKDOS_LABEL: u16 = 0o51414;
@@ -254,6 +254,7 @@ pub struct Fs {
     /// read only mode
     read_only: bool,
     reader: Option<Reader>,
+    #[allow(dead_code)]
     writer: Option<File>,
     offset: u64,
     inverted: bool,
@@ -376,7 +377,7 @@ impl Fs {
         if let Some(reader) = self.reader.as_mut() {
             let buf = &mut self.meta.raw[..];
             // let size = reader.read_at(buf, 0)?;
-            let pos = reader.seek(SeekFrom::Start(self.offset))?;
+            let _pos = reader.seek(SeekFrom::Start(self.offset))?;
             let size = reader.read(buf)?;
             if size < META_SIZE {
                 return Err(FsError::BadMetaSize(size));
@@ -438,7 +439,7 @@ impl Fs {
                 let mut dentry = DirEntry::new();
                 let buf = &mut dentry.raw[..];
                 // reader.seek(SeekFrom::Start(cur_pos as u64))?;
-                reader.read(buf)?;
+                let _ = reader.read(buf)?;
 
                 let mut buf = &dentry.raw[..];
                 let f_status = buf.get_u8();
