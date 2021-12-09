@@ -1,7 +1,7 @@
 use std::{
     fmt::Debug,
     fs::{File, OpenOptions},
-    io::{Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     os::unix::fs::{FileExt, MetadataExt},
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
@@ -9,8 +9,11 @@ use std::{
 
 use bytes::Buf;
 use encoding_rs::KOI8_R;
+use io::{BinInvertedReader, Reader};
 use thiserror::Error;
-use tracing::{debug, instrument, trace, warn};
+use tracing::{debug, instrument, trace, warn, Instrument};
+
+mod io;
 
 pub const BLOCK_SIZE: usize = 512;
 pub const MKDOS_LABEL: u16 = 0o51414;
@@ -250,8 +253,10 @@ pub struct Fs {
     file_path: String,
     /// read only mode
     read_only: bool,
-    reader: Option<File>,
+    reader: Option<Reader>,
     writer: Option<File>,
+    offset: u64,
+    inverted: bool,
     /// image meta block
     meta: Meta,
     /// directory inodes
@@ -270,9 +275,11 @@ impl std::fmt::Debug for Fs {
         f.debug_struct("Fs")
             .field("file_name", &self.file_path)
             .field("read_only", &self.read_only)
-            .field("reader", &self.reader)
-            .field("writer", &self.writer)
+            // .field("reader", &self.reader)
+            // .field("writer", &self.writer)
             .field("meta", &self.meta)
+            .field("offset", &self.offset)
+            .field("inverted", &self.inverted)
             .field("dir_inodes", &self.dir_inodes)
             .field("file_inodes", &self.file_inodes)
             .field("next_fh", &self.next_fh)
@@ -288,6 +295,8 @@ impl Default for Fs {
             read_only: true,
             reader: None,
             writer: None,
+            offset: 0,
+            inverted: false,
             meta: Meta::new(),
             dir_inodes: AtomicU64::new(2),
             file_inodes: AtomicU64::new(1001),
@@ -347,7 +356,12 @@ impl Fs {
                 desc: format!("Can't open {:?}", &fname),
                 source: e,
             })?;
-        self.reader = Some(h);
+        let reader = if self.inverted {
+            Reader::new(h)
+        } else {
+            Reader::inverted(h)
+        };
+        self.reader = Some(reader);
         self.read_meta()?;
         self.read_entries()?;
 
@@ -361,9 +375,9 @@ impl Fs {
         // warn!(parent: &self._tracing_span, "TESTING TARGET: _tracing_span");
         if let Some(reader) = self.reader.as_mut() {
             let buf = &mut self.meta.raw[..];
-            // reader.seek(io::SeekFrom::Start(0))?;
-            // reader.read(buf)?;
-            let size = reader.read_at(buf, 0)?;
+            // let size = reader.read_at(buf, 0)?;
+            let pos = reader.seek(SeekFrom::Start(self.offset))?;
+            let size = reader.read(buf)?;
             if size < META_SIZE {
                 return Err(FsError::BadMetaSize(size));
             }
@@ -409,7 +423,7 @@ impl Fs {
 
     #[instrument(level = "trace", skip(self))]
     fn read_entries(&mut self) -> Result<(), FsError> {
-        let mut cur_pos = MetaOffset::DirEntriesStart as u64;
+        let mut cur_pos = MetaOffset::DirEntriesStart as u64 + self.offset;
         let mut count_all = 0;
         let mut count_normal = 0;
         let mut count_deleted = 0;
@@ -423,7 +437,8 @@ impl Fs {
             loop {
                 let mut dentry = DirEntry::new();
                 let buf = &mut dentry.raw[..];
-                reader.read_at(buf, cur_pos)?;
+                // reader.seek(SeekFrom::Start(cur_pos as u64))?;
+                reader.read(buf)?;
 
                 let mut buf = &dentry.raw[..];
                 let f_status = buf.get_u8();
@@ -585,9 +600,10 @@ impl Fs {
             .find(|&entry| entry.parent_inode == parent_inode && entry.name == name)
     }
 
-    pub fn read_exact_at(&self, buf: &mut [u8], offset: u64) -> Result<(), std::io::Error> {
-        if let Some(reader) = self.reader.as_ref() {
-            reader.read_exact_at(buf, offset)
+    pub fn read_exact_at(&mut self, buf: &mut [u8], offset: u64) -> Result<usize, std::io::Error> {
+        if let Some(reader) = self.reader.as_mut() {
+            let _pos = reader.seek(SeekFrom::Start(self.offset + offset))?;
+            reader.read(buf)
         } else {
             todo!()
         }
@@ -611,5 +627,20 @@ impl Fs {
 
     pub fn blocks(&self) -> u64 {
         self.meta.blocks as u64
+    }
+
+    /// Set the fs's offset.
+    pub fn set_offset(&mut self, offset: u64) {
+        self.offset = offset;
+    }
+
+    /// Set the fs's offset in blocks.
+    pub fn set_offset_blocks(&mut self, offset: u64) {
+        self.offset = offset * BLOCK_SIZE as u64;
+    }
+
+    /// Set the fs's inverted.
+    pub fn set_inverted(&mut self, inverted: bool) {
+        self.inverted = inverted;
     }
 }
