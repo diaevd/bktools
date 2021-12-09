@@ -50,6 +50,7 @@ const ROOT_DIR_ATTR: fuser::FileAttr = fuser::FileAttr {
 };
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct FuseFs {
     /// path to image
     file_path: String,
@@ -61,6 +62,10 @@ pub struct FuseFs {
     show_bad: bool,
     /// Enable show deleted
     show_deleted: bool,
+    /// Use binary inverted reader
+    inverted: bool,
+    /// Offset from start of image in blocks
+    offset: u64,
     ///
     fs: Fs,
     _tracing_span: tracing::Span,
@@ -75,19 +80,26 @@ impl Default for FuseFs {
             read_only: true,
             show_bad: false,
             show_deleted: false,
+            inverted: false,
+            offset: 0,
             fs: Fs::default(),
         }
     }
 }
 
 impl FuseFs {
-    pub fn new(fname: &str) -> Result<Self, FsError> {
-        let mut fs = Fs::new(fname);
-        fs.try_open()?;
-        Ok(Self {
+    pub fn new(fname: &str) -> Self {
+        let fs = Fs::new(fname);
+        Self {
+            file_path: fname.into(),
+            demonize: false,
             fs,
             ..Default::default()
-        })
+        }
+    }
+
+    pub fn try_open(&mut self) -> Result<(), FsError> {
+        self.fs.try_open()
     }
 
     pub fn show_bad(&mut self, arg: bool) {
@@ -96,6 +108,18 @@ impl FuseFs {
 
     pub fn show_deleted(&mut self, arg: bool) {
         self.show_deleted = arg;
+    }
+
+    /// Set the fuse fs's inverted.
+    pub fn set_inverted(&mut self, inverted: bool) {
+        self.inverted = inverted;
+        self.fs.set_inverted(inverted);
+    }
+
+    /// Set the fuse fs's offset.
+    pub fn set_offset(&mut self, offset: u64) {
+        self.offset = offset;
+        self.fs.set_offset_blocks(offset);
     }
 }
 
