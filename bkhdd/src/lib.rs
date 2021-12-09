@@ -7,6 +7,8 @@ use byteordered::ByteOrdered;
 use io::BinInvertedReader;
 use thiserror::Error;
 
+use crate::io::ReverseReader;
+
 pub mod io;
 
 #[derive(Error, Debug)]
@@ -17,8 +19,10 @@ pub enum AHDDError {
     FhRef,
     #[error("File name is not set")]
     EmptyName,
-    #[error("Header read error size {} <=> {0}", BLOCK_SIZE)]
+    #[error("Header read error size {} != {0}", BLOCK_SIZE)]
     ReadHeaderSize(usize),
+    #[error("Header checksum error {0} != {1}")]
+    CheckSum(u16, u16),
     #[error("Io Error")] //
     Io {
         #[from]
@@ -80,24 +84,50 @@ pub const AHDD_DRV_B: usize = 0o775;
 pub const AHDD_CYL_B: usize = 0o776;
 /// u16 инициализация для контрольной суммы
 pub const AHDD_CS_INIT: u16 = 0o12701;
+/// размер заголовка в словах
+pub const AHDD_HEADER_WORDS: usize = 4;
 
 /// Altec Pro HDD Layout
+/// это читается ReverseReader-ом, то есть сверху вниз
+/// Формат (words):
+/// 4 - основной заголовок
+/// 5..(partitions * 2) - записи о разделах
+/// 1 - контрольная сумма
 #[binrw]
 #[brw(little)]
 #[derive(Default, Debug)]
 pub struct AHDDLayout {
-    /// u8 количество логических дисков разделов
-    partitions: u8, // 0o770
-    /// u8 хуй знает
-    uni: u8, // 0o771
-    /// u16 количество секторов на дорожке?
-    sectors: u16, // 0o772
-    /// u8 количество головок (дорожек)?
-    heads: u8, // 0o774
-    /// u8 номер загрузозного раздела (LD)?
-    drv: u8, // 0o775
-    /// u16 количество цидиндров
+    /// u16 количество цидиндров (-2)
     cylinders: u16, // 0o776
+    /// u8 номер загрузозного раздела (LD)? (-3)
+    drv: u8, // 0o775
+    /// u8 количество головок (дорожек)? (-4)
+    heads: u8, // 0o774
+    /// u16 количество секторов на дорожке? (-6)
+    sectors: u16, // 0o772
+    /// u8 хуй знает (-7)
+    uni: u8, // 0o771
+    /// u8 количество логических дисков разделов (-8)
+    partitions: u8, // 0o770
+    /// Таблица партишинов
+    #[br(count = partitions)]
+    part_entries: Vec<AHDDPattionEntrie>,
+    /// контрольная сумма
+    checksum: u16,
+}
+
+/// Запись о разделе 2 слова
+#[binrw]
+#[brw(little)]
+#[derive(Default, Debug)]
+pub struct AHDDPattionEntrie {
+    /// Номер цилиндра и головки (если инвертировано, то защищен)
+    /// Биты:
+    ///  - 15:4 - номер цилинда
+    ///  - 3:0  - номер головки
+    cyl_head: u16,
+    /// размер в блоках
+    blocks: u16,
 }
 
 pub struct AHDD {
@@ -127,22 +157,24 @@ impl Default for AHDD {
 }
 
 #[derive(Debug, Default)]
-struct Partition {
-    start_cylinder: u16,
-    start_head: u16,
-    start_sector: u16,
-    lba: u32,
-    length: u32,
-    end_cylinder: u16,
-    end_head: u16,
-    end_sector: u16,
-    protected: bool,
+pub struct Partition {
+    pub start_cylinder: u16,
+    pub start_head: u16,
+    pub start_sector: u16,
+    pub lba: u32,
+    pub length: u32,
+    pub end_block: u32,
+    pub end_cylinder: u16,
+    pub end_head: u16,
+    pub end_sector: u16,
+    pub protected: bool,
 }
 
 impl AHDD {
     pub fn new(fname: &str) -> Self {
         Self {
             file_name: String::from(fname),
+            read_only: true,
             ..Default::default()
         }
     }
@@ -189,101 +221,50 @@ impl AHDD {
         }
         if let Some(fh) = self.fh.as_mut() {
             let mut reader = BinInvertedReader::new(fh);
-            let mut buf = vec![0u8; BLOCK_SIZE];
+            let mut buf = [0u8; BLOCK_SIZE];
             let offset = self.offset + (AHDD_PT_SEC * BLOCK_SIZE) as u64;
             let pos = reader.seek(SeekFrom::Start(offset))?;
-            // dbg!(&pos);
             let size = reader.read(&mut buf)?;
-            // eprintln!("buf {:x?}", buf);
             if size != BLOCK_SIZE {
                 return Err(AHDDError::ReadHeaderSize(size));
             }
             let mut c = Cursor::new(&buf[..]);
-            let pos = c.seek(SeekFrom::Start(AHDD_LOGD_B as u64))?;
-            // dbg!(&pos);
-            let layout = AHDDLayout::read(&mut c)?;
-            // dbg!(&layout);
-            let pos = c.seek(SeekFrom::Start(
-                AHDD_PART_B as u64 - (4 * layout.partitions as u64),
-            ))?;
-            // dbg!(&pos);
-            let mut br = ByteOrdered::le(&mut c);
-            let checksum = br.read_u16()?;
-            // dbg!(&checksum);
-            for _ in 0..layout.partitions {
-                // dbg!(&br.stream_position());
+            let pos = c.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
+            // читаем в обратном порядке
+            let mut rr = ReverseReader::new(c);
+            let layout = AHDDLayout::read(&mut rr)?;
+            dbg!(&layout);
+            for entrie in layout.part_entries.iter() {
                 let mut part = Partition::default();
-                // размер раздела в блоках
-                let len = br.read_u16()? as u32;
+                let len = entrie.blocks as u32;
                 part.length = len;
-                // номер первого цилинда и номер головки
-                let mut cyl = br.read_u16()?;
-                if (cyl as i16) < 0 {
+                let (head, cyl) = if entrie.cyl_head & 0x8000 != 0 {
                     part.protected = true;
-                    cyl = !cyl;
-                }
-                let head = cyl & 0xF;
-                cyl >>= 4;
+                    (!entrie.cyl_head & 0xF, entrie.cyl_head >> 4)
+                } else {
+                    (entrie.cyl_head & 0xF, entrie.cyl_head >> 4)
+                };
                 // рассчитываем начало раздела в блоках
                 let lba: u32 =
                     (cyl as u32 * layout.heads as u32 + head as u32) * layout.sectors as u32;
                 part.lba = lba;
                 part.start_cylinder = cyl;
                 part.start_head = head;
-                part.start_sector = 1; // всегда 1
-                                       // конец раздела
+                part.start_sector = 1;
+                // конец раздела
                 let end = lba + len;
+                part.end_block = end;
                 part.end_cylinder = (end / (layout.heads as u16 * layout.sectors) as u32) as u16;
                 part.end_head = ((end / layout.sectors as u32) % layout.heads as u32) as u16;
                 part.end_sector = (end % layout.sectors as u32 + 1) as u16;
 
-                self.partitions.insert(0, part);
+                self.partitions.push(part);
             }
             dbg!(&self.partitions);
-            // dbg!(&br.stream_position());
-            let offset = AHDD_PART_B as u64 - (4 * layout.partitions as u64) + 2;
-            // dbg!(&offset);
-            let mut cs = AHDD_CS_INIT;
-            let mut count = 0;
-            for i in (0..(BLOCK_SIZE as u64 - offset) / 2) {
-                let pos = br.seek(SeekFrom::Start(BLOCK_SIZE as u64 - (i * 2) - 2))?;
-                // dbg!(&pos);
-                cs = cs.wrapping_add(br.read_u16()?);
-                count += 1;
-            }
-            // dbg!(&checksum, &cs);
-            // let pos = br.seek(SeekFrom::Start(offset - 2))?;
-            // dbg!(&pos);
-            // let crc = br.read_u16()?;
-            // dbg!(&crc, &count);
-            // cs.wrapping_add(crc);
-            // dbg!(&cs);
-            // dbg!(&c.stream_position());
-            assert!(checksum == cs);
-            self.checksum = cs;
-            let part = &self.partitions[0];
-            let pos = part.lba;
-            dbg!(&pos);
-            // let offset =
-            //     self.offset + (BLOCK_SIZE * AHDD_PT_SEC) as u64 + (pos as u64 * BLOCK_SIZE as u64);
-            let offset = self.offset + (pos as u64 * BLOCK_SIZE as u64);
-            // let fh = reader.into_inner();
-            let pos1 = reader.seek(SeekFrom::Start(offset))?;
-            dbg!(&pos1);
-            let size = reader.read(&mut buf)?;
-            eprintln!("buf {:x?}", buf);
-            if size != BLOCK_SIZE {
-                return Err(AHDDError::ReadHeaderSize(size));
-            }
-            // eprintln!("{:o} ", b);
-            let mut w = OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .append(false)
-                .open("test_block.dump")?;
-            w.write(&buf[..])?;
-            w.flush()?;
+
+            self.raw = buf;
+            self.layout = layout;
+            self.checksum = self.checksum()?;
         } else {
             return Err(AHDDError::FhMut);
         }
@@ -291,7 +272,27 @@ impl AHDD {
         Ok(())
     }
 
-    pub fn checksum(&self) {}
+    pub fn partitions(&self) -> &Vec<Partition> {
+        &self.partitions
+    }
+
+    pub fn checksum(&self) -> Result<u16, AHDDError> {
+        let mut c = Cursor::new(&self.raw[..]);
+        let mut rr = ReverseReader::new(c);
+
+        rr.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
+        let mut br = ByteOrdered::le(&mut rr);
+        let mut cs = AHDD_CS_INIT;
+        for _ in 0..(AHDD_HEADER_WORDS + self.layout.partitions as usize * 2) {
+            cs = cs.wrapping_add(br.read_u16()?);
+        }
+        dbg!(&self.layout.checksum, &cs);
+        if self.layout.checksum != cs {
+            return Err(AHDDError::CheckSum(self.layout.checksum, cs));
+        }
+
+        Ok(cs)
+    }
 }
 
 ///
