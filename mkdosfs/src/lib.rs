@@ -314,7 +314,7 @@ pub enum FsError {
     FuserInitError(i32),
     #[error("Bad meta size: {0}")]
     BadMetaSize(usize),
-    #[error("Can't find NicroDOS label")]
+    #[error("Can't find MicroDOS label")]
     LabelMicroDos,
     #[error("Can't find MKDOS label")]
     LabelMkDos,
@@ -358,9 +358,9 @@ impl Fs {
                 source: e,
             })?;
         let reader = if self.inverted {
-            Reader::new(h)
-        } else {
             Reader::inverted(h)
+        } else {
+            Reader::new(h)
         };
         self.reader = Some(reader);
         self.read_meta()?;
@@ -382,9 +382,7 @@ impl Fs {
             if size < META_SIZE {
                 return Err(FsError::BadMetaSize(size));
             }
-
             let mut buf = &self.meta.raw[..];
-            // let mut meta = Meta::new();
             buf.advance(MetaOffset::Files as usize);
             self.meta.files = buf.get_u16_le();
             self.meta.blocks = buf.get_u16_le();
