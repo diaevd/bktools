@@ -3,7 +3,7 @@ use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg};
 use color_eyre::eyre::Result;
 use std::{
     fs,
-    io::{Cursor, Read, Seek, SeekFrom},
+    io::{Cursor, Read, Seek, SeekFrom, Write},
 };
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -38,28 +38,30 @@ fn main() -> Result<()> {
     let hdi = HDILayout::read(&mut f)?;
     dbg!(&hdi);
 
-    union buffer {
-        bytes: [u8; BLOCK_SIZE],
-        words: [u16; BLOCK_SIZE / 2],
-    }
-
-    let mut buf = buffer {
-        bytes: [0u8; BLOCK_SIZE],
-    };
-    let size_of_buffer = std::mem::size_of::<buffer>();
-    assert_eq!(BLOCK_SIZE, size_of_buffer);
-
-    f.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
-    let mut rr = ReverseReader::new(f);
-    let size = rr.read(unsafe { &mut buf.bytes[..] })?;
-    dbg!(size);
-    eprintln!("bytes: {:x?}", unsafe { buf.bytes });
-    eprintln!("words: {:x?}", unsafe { buf.words });
-
     let mut ahdd = AHDD::new(image_name);
     ahdd.set_offset(BLOCK_SIZE as u64);
     ahdd.read_header()?;
-    // let mut c = Cursor::new(&buf);
+
+    let part = &ahdd.partitions()[2];
+    let pos = part.lba;
+    dbg!(&pos);
+
+    let offset = BLOCK_SIZE as u64 + (pos as u64 * BLOCK_SIZE as u64);
+    let pos = f.seek(SeekFrom::Start(offset))?;
+    dbg!(&pos);
+
+    let mut buf = [0u8; BLOCK_SIZE];
+    let mut reader = BinInvertedReader::new(f);
+    let size = reader.read(&mut buf)?;
+    assert_eq!(size, BLOCK_SIZE);
+    let mut w = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .append(false)
+        .open("test_block.dump")?;
+    w.write(&buf[..])?;
+    w.flush()?;
 
     Ok(())
 }
