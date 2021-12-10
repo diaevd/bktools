@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     ahdd.set_offset(BLOCK_SIZE as u64);
     ahdd.read_header()?;
 
-    let part = &ahdd.partitions()[2];
+    let part = &ahdd.partitions()[0];
     let pos = part.lba;
     dbg!(&pos);
 
