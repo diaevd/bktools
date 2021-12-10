@@ -188,6 +188,7 @@ pub struct DirEntry {
     pub is_logical: bool,
     pub is_bad: bool,
     pub is_deleted: bool,
+    pub is_unknown: bool,
     /// unix mode
     pub mode: u16,
     raw: [u8; DIR_ENTRY_SIZE],
@@ -211,6 +212,7 @@ impl Debug for DirEntry {
             .field("is_logical", &self.is_logical)
             .field("is_bad", &self.is_bad)
             .field("is_deleted", &self.is_deleted)
+            .field("is_unknown", &self.is_unknown)
             .field("mode", &format_args!("{:o}", &self.mode))
             // .field("raw", &self.raw)
             .finish()
@@ -241,6 +243,7 @@ impl Default for DirEntry {
             is_logical: false,
             is_bad: false,
             is_deleted: false,
+            is_unknown: false,
             // r--r--r-- ;)
             mode: 0o0444,
             raw: [0; DIR_ENTRY_SIZE],
@@ -386,11 +389,6 @@ impl Fs {
             buf.advance(MetaOffset::Files as usize);
             self.meta.files = buf.get_u16_le();
             self.meta.blocks = buf.get_u16_le();
-            // buf.advance(
-            //     usize::from(MetaOffset::MicrodosLabel)
-            //         - usize::from(MetaOffset::Blocks)
-            //         - 2 as usize,
-            // );
             buf.advance(MetaOffset::LabelsOffset as usize);
             let label = buf.get_u16_le();
             if label != MICRODOS_LABEL {
@@ -403,6 +401,9 @@ impl Fs {
             buf.advance(MetaOffset::DiskSizeOffset as usize);
             self.meta.disk_size = buf.get_u16_le();
             self.meta.start_block = buf.get_u16_le();
+            if self.meta.start_block < 20 {
+                warn!(parent: &self._tracing_span, "Start block record = {} less than 20 Strange!", self.meta.start_block);
+            }
 
             trace!(?self.meta);
 
@@ -425,21 +426,23 @@ impl Fs {
         let mut cur_pos = MetaOffset::DirEntriesStart as u64 + self.offset;
         let mut count_all = 0;
         let mut count_normal = 0;
+        let mut count_logical = 0;
         let mut count_deleted = 0;
         let mut count_bad = 0;
         let mut used_blocks = 0;
         let mut bad_blocks = 0;
         let mut hole_blocks = 0;
         if let Some(reader) = self.reader.as_mut() {
-            reader.seek(SeekFrom::Start(cur_pos as u64))?;
+            let pos = reader.seek(SeekFrom::Start(cur_pos as u64))?;
+            dbg!(&pos);
             use DirEntryStatus::*;
             loop {
                 let mut dentry = DirEntry::new();
                 let buf = &mut dentry.raw[..];
                 // reader.seek(SeekFrom::Start(cur_pos as u64))?;
                 let _ = reader.read(buf)?;
-
                 let mut buf = &dentry.raw[..];
+
                 let f_status = buf.get_u8();
                 let dir_no = buf.get_u8();
                 let name = buf.get(..14).unwrap();
@@ -484,6 +487,7 @@ impl Fs {
                         2 => {
                             dentry.is_logical = true;
                             count_normal += 1;
+                            count_logical += 1;
                             used_blocks += blocks;
                             LogicalDisk
                         }
@@ -500,7 +504,19 @@ impl Fs {
                             Deleted
                         }
                         n => {
+                            // если мы в конце каталога, то ловить уже нечего
+                            // иначе проверим совсем ли это мусор
+                            // или еще есть смысл сохранить эту запись
+                            if count_normal >= self.meta.files
+                                || start_block <= self.meta.start_block
+                                || start_block >= self.meta.disk_size
+                                || blocks > self.meta.disk_size - self.meta.blocks
+                            {
+                                break;
+                            }
+
                             warn!(parent: &self._tracing_span, "Uknown Status: 0{:o}", n);
+                            dentry.is_unknown = true;
                             Normal
                         }
                     }
@@ -544,10 +560,14 @@ impl Fs {
                     // dbg!(&dentry);
                     dentry.parent_inode = 1;
                 }
+                if dentry.is_unknown {
+                    warn!(parent: &self._tracing_span,
+                          "File with unknown status {:?}", dentry);
+                }
                 self.entries.push(dentry);
 
                 cur_pos += DIR_ENTRY_SIZE as u64;
-                if cur_pos > start_block as u64 * BLOCK_SIZE as u64 {
+                if cur_pos > start_block as u64 * BLOCK_SIZE as u64 + self.offset {
                     break;
                 }
             }
@@ -557,7 +577,7 @@ impl Fs {
         }
         // trace!(parent: &self._tracing_span, "ENTRIES: {:#?}", self.entries);
         debug!(parent: &self._tracing_span,
-            count_normal, count_deleted, count_all, count_bad, "ENTRIES:"
+            count_normal, count_deleted, count_logical, count_bad, count_all, "ENTRIES:"
         );
         // assert_eq!(self.meta.files, count_normal);
         if count_normal != self.meta.files {
@@ -570,10 +590,10 @@ impl Fs {
                used_blocks, bad_blocks, hole_blocks, "ENTRIES:"
         );
         // assert_eq!(self.meta.blocks, used_blocks);
-        if used_blocks != self.meta.blocks {
+        if used_blocks + self.meta.start_block != self.meta.blocks {
             warn!(parent: &self._tracing_span,
                   "Wrong used blocks? Meta file blocks is {} but {} found",
-                  self.meta.blocks, used_blocks
+                  self.meta.blocks, used_blocks + self.meta.start_block
             );
         }
 
