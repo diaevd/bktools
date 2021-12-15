@@ -25,13 +25,14 @@ fn main() -> Result<()> {
             Arg::with_name("IMAGE_NAME")
                 .required(true)
                 .index(1)
-                .help("MKDOS disk image file path"),
+                .help("HDD image file path"),
         )
         .get_matches();
 
     info!("Starting");
 
     let image_name = matches.value_of("IMAGE_NAME").unwrap();
+    let _ = 0o123123;
 
     let mut f = fs::File::open(image_name)?;
     f.seek(SeekFrom::Start(0))?;
@@ -39,7 +40,8 @@ fn main() -> Result<()> {
     dbg!(&hdi);
 
     let mut ahdd = AHDD::new(image_name);
-    ahdd.set_offset(BLOCK_SIZE as u64);
+    // ahdd.set_offset(BLOCK_SIZE as u64);
+    ahdd.set_offset(0 as u64);
     ahdd.read_header()?;
 
     let part = &ahdd.partitions()[0];
