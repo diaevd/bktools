@@ -17,9 +17,7 @@ where
 
 impl<R: Read + Seek> Read for BinInvertedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        eprintln!("< READ: {:?}", self.0.stream_position().unwrap());
         let size = self.0.read(buf)?;
-        eprintln!("> READ: {:?}", self.0.stream_position().unwrap());
         buf.iter_mut().for_each(|b| *b = !*b);
         Ok(size)
     }
@@ -48,15 +46,10 @@ where
 
 impl<R: Read + Seek> Read for ReverseReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        // eprintln!("< READ pos: {:?}", self.0.stream_position().unwrap());
         let len = buf.len();
-        // eprintln!("< READ len: {:?}", len);
-        let pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
-        // eprintln!("< READ set new pos: {:?}", pos);
+        let _pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
         let size = self.0.read(buf)?;
-        // eprintln!("> READ: {:?}", self.0.stream_position().unwrap());
-        let pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
-        // eprintln!("> READ set new pos: {:?}", pos);
+        let _pos = self.0.seek(SeekFrom::Current(-(len as i64)))?;
         Ok(size)
     }
 }

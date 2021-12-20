@@ -260,6 +260,7 @@ pub struct Fs {
     #[allow(dead_code)]
     writer: Option<File>,
     offset: u64,
+    size: u64,
     inverted: bool,
     /// image meta block
     meta: Meta,
@@ -283,6 +284,7 @@ impl std::fmt::Debug for Fs {
             // .field("writer", &self.writer)
             .field("meta", &self.meta)
             .field("offset", &self.offset)
+            .field("size", &self.size)
             .field("inverted", &self.inverted)
             .field("dir_inodes", &self.dir_inodes)
             .field("file_inodes", &self.file_inodes)
@@ -300,6 +302,7 @@ impl Default for Fs {
             reader: None,
             writer: None,
             offset: 0,
+            size: 0,
             inverted: false,
             meta: Meta::new(),
             dir_inodes: AtomicU64::new(2),
@@ -321,6 +324,8 @@ pub enum FsError {
     LabelMicroDos,
     #[error("Can't find MKDOS label")]
     LabelMkDos,
+    #[error("Unknown size in image with offset. Must use set_size_blocks()")]
+    UnknownSize,
     #[error("Io: {desc}")]
     CustomIo {
         desc: String,
@@ -346,10 +351,6 @@ impl Fs {
 
     #[instrument(level = "trace", skip(self), fields(file_path, ?self.file_path))]
     pub fn try_open(&mut self) -> Result<(), FsError> {
-        // trace!("TEST1");
-        let _ = tracing::Span::current().enter();
-        // trace!("TEST2");
-
         let fname = PathBuf::new().join(&self.file_path);
         let h = OpenOptions::new()
             .read(true)
@@ -360,6 +361,13 @@ impl Fs {
                 desc: format!("Can't open {:?}", &fname),
                 source: e,
             })?;
+        if self.size == 0 {
+            if self.offset != 0 {
+                return Err(FsError::UnknownSize);
+            }
+            let m = h.metadata()?;
+            self.size = m.blocks() * BLOCK_SIZE as u64;
+        }
         let reader = if self.inverted {
             Reader::inverted(h)
         } else {
@@ -407,11 +415,8 @@ impl Fs {
 
             trace!(?self.meta);
 
-            let meta = reader.metadata()?;
-            trace!(?meta);
-
-            if meta.blocks() < self.meta.disk_size as u64 {
-                warn!(parent: &self._tracing_span, "Wrong (corrupted?) disk size {} in meta block but image size is {}", self.meta.disk_size, meta.blocks());
+            if (self.size / BLOCK_SIZE as u64) < self.meta.disk_size as u64 {
+                warn!(parent: &self._tracing_span, "Wrong (corrupted?) disk size {} in meta block but image size is {}", self.meta.disk_size, (self.size / BLOCK_SIZE as u64));
             }
         } else {
             todo!("Need to Reopen");
@@ -433,8 +438,8 @@ impl Fs {
         let mut bad_blocks = 0;
         let mut hole_blocks = 0;
         if let Some(reader) = self.reader.as_mut() {
-            let pos = reader.seek(SeekFrom::Start(cur_pos as u64))?;
-            dbg!(&pos);
+            let _pos = reader.seek(SeekFrom::Start(cur_pos as u64))?;
+            // dbg!(&pos);
             use DirEntryStatus::*;
             loop {
                 let mut dentry = DirEntry::new();
@@ -539,7 +544,13 @@ impl Fs {
                 dentry.start_block = start_block as u64;
                 dentry.blocks = blocks as u64;
                 dentry.start_address = start_address as u32;
-                dentry.length = length as u32;
+                // вот как здесь лучше с размером пуступить пока не знаю
+                // сделаем просто
+                if blocks > (u16::MAX as usize / BLOCK_SIZE) as u16 {
+                    dentry.length = (blocks as usize * BLOCK_SIZE) as u32;
+                } else {
+                    dentry.length = length as u32;
+                }
 
                 if is_directory {
                     // dentry.inode = self.dir_inodes.fetch_add(1, Ordering::SeqCst)
@@ -656,6 +667,16 @@ impl Fs {
     /// Set the fs's offset in blocks.
     pub fn set_offset_blocks(&mut self, offset: u64) {
         self.offset = offset * BLOCK_SIZE as u64;
+    }
+
+    /// Set the fs's size
+    pub fn set_size(&mut self, size: u64) {
+        self.size = size;
+    }
+
+    /// Set the fs's size in blocks.
+    pub fn set_size_blocks(&mut self, size: u64) {
+        self.size = size * BLOCK_SIZE as u64;
     }
 
     /// Set the fs's inverted.

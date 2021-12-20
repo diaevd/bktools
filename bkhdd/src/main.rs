@@ -10,7 +10,7 @@ use tracing_subscriber::EnvFilter;
 
 use bkhdd::{
     io::{BinInvertedReader, ReverseReader},
-    AHDDLayout, HDILayout, AHDD, AHDD_CYL_B, AHDD_LOGD_B, AHDD_PT_SEC, BLOCK_SIZE,
+    AHDDLayout, HDILayout, AHDD, AHDD_CYL_B, AHDD_LOGD_B, AHDD_PT_SEC, BLOCK_SIZE, HDI,
 };
 
 fn main() -> Result<()> {
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
             Arg::with_name("IMAGE_NAME")
                 .required(true)
                 .index(1)
-                .help("MKDOS disk image file path"),
+                .help("HDD image file path"),
         )
         .get_matches();
 
@@ -33,35 +33,29 @@ fn main() -> Result<()> {
 
     let image_name = matches.value_of("IMAGE_NAME").unwrap();
 
-    let mut f = fs::File::open(image_name)?;
-    f.seek(SeekFrom::Start(0))?;
-    let hdi = HDILayout::read(&mut f)?;
-    dbg!(&hdi);
+    let mut hdi = HDI::new(image_name);
+    hdi.try_open()?;
 
-    let mut ahdd = AHDD::new(image_name);
-    ahdd.set_offset(BLOCK_SIZE as u64);
-    ahdd.read_header()?;
-
-    let part = &ahdd.partitions()[0];
+    let part = hdi.partitions()[0];
     let pos = part.lba;
     dbg!(&pos);
 
-    let offset = BLOCK_SIZE as u64 + (pos as u64 * BLOCK_SIZE as u64);
-    let pos = f.seek(SeekFrom::Start(offset))?;
-    dbg!(&pos);
+    // let offset = BLOCK_SIZE as u64 + (pos as u64 * BLOCK_SIZE as u64);
+    // let pos = f.seek(SeekFrom::Start(offset))?;
+    // dbg!(&pos);
 
-    let mut buf = [0u8; BLOCK_SIZE];
-    let mut reader = BinInvertedReader::new(f);
-    let size = reader.read(&mut buf)?;
-    assert_eq!(size, BLOCK_SIZE);
-    let mut w = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .append(false)
-        .open("test_block.dump")?;
-    w.write(&buf[..])?;
-    w.flush()?;
+    // let mut buf = [0u8; BLOCK_SIZE];
+    // let mut reader = BinInvertedReader::new(f);
+    // let size = reader.read(&mut buf)?;
+    // assert_eq!(size, BLOCK_SIZE);
+    // let mut w = fs::OpenOptions::new()
+    //     .create(true)
+    //     .truncate(true)
+    //     .write(true)
+    //     .append(false)
+    //     .open("test_block.dump")?;
+    // w.write(&buf[..])?;
+    // w.flush()?;
 
     Ok(())
 }

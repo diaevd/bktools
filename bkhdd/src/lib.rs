@@ -1,8 +1,8 @@
 use std::fs::{self, OpenOptions};
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::path::Path;
 
 use binrw::{binrw, BinRead};
-use byteordered::byteorder::ReadBytesExt;
 use byteordered::ByteOrdered;
 use io::BinInvertedReader;
 use thiserror::Error;
@@ -21,6 +21,8 @@ pub enum AHDDError {
     EmptyName,
     #[error("Header read error size {} != {0}", BLOCK_SIZE)]
     ReadHeaderSize(usize),
+    #[error("Header partitions count error {0} > 124")]
+    HeaderPartitionsCount(u8),
     #[error("Header checksum error {0} != {1}")]
     CheckSum(u16, u16),
     #[error("Io Error")] //
@@ -101,15 +103,16 @@ pub struct AHDDLayout {
     cylinders: u16, // 0o776
     /// u8 номер загрузозного раздела (LD)? (-3)
     drv: u8, // 0o775
-    /// u8 количество головок (дорожек)? (-4)
+    /// u8 количество головок (дорожек) (-4)
     heads: u8, // 0o774
-    /// u16 количество секторов на дорожке? (-6)
+    /// u16 количество секторов на дорожке (-6)
     sectors: u16, // 0o772
-    /// u8 хуй знает (-7)
+    /// u8 хуй знает че здесь (-7)
     uni: u8, // 0o771
-    /// u8 количество логических дисков разделов (-8)
+    /// u8 количество логических дисков / разделов (-8)
     partitions: u8, // 0o770
-    /// Таблица партишинов
+    /// Таблица разделов
+    #[br(if(partitions <= 124))]
     #[br(count = partitions)]
     part_entries: Vec<AHDDPattionEntrie>,
     /// контрольная сумма
@@ -188,6 +191,7 @@ impl AHDD {
             .read(true)
             .write(!self.read_only)
             .append(false)
+            .truncate(false)
             .open(&self.file_name)?;
 
         self.fh = Some(fh);
@@ -221,26 +225,28 @@ impl AHDD {
         }
         if let Some(fh) = self.fh.as_mut() {
             let mut reader = BinInvertedReader::new(fh);
-            let mut buf = [0u8; BLOCK_SIZE];
             let offset = self.offset + (AHDD_PT_SEC * BLOCK_SIZE) as u64;
-            let pos = reader.seek(SeekFrom::Start(offset))?;
-            let size = reader.read(&mut buf)?;
+            let _pos = reader.seek(SeekFrom::Start(offset))?;
+            let size = reader.read(&mut self.raw[..])?;
             if size != BLOCK_SIZE {
                 return Err(AHDDError::ReadHeaderSize(size));
             }
+            let buf = &mut self.raw;
             let mut c = Cursor::new(&buf[..]);
-            let pos = c.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
+            let _pos = c.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
             // читаем в обратном порядке
             let mut rr = ReverseReader::new(c);
-            let layout = AHDDLayout::read(&mut rr)?;
-            dbg!(&layout);
+            self.layout = AHDDLayout::read(&mut rr)?;
+            // dbg!(&layout);
+            self.checksum = self.checksum()?;
+            let layout = &self.layout;
             for entrie in layout.part_entries.iter() {
                 let mut part = Partition::default();
                 let len = entrie.blocks as u32;
                 part.length = len;
                 let (head, cyl) = if entrie.cyl_head & 0x8000 != 0 {
                     part.protected = true;
-                    (!entrie.cyl_head & 0xF, entrie.cyl_head >> 4)
+                    (!entrie.cyl_head & 0xF, !entrie.cyl_head >> 4)
                 } else {
                     (entrie.cyl_head & 0xF, entrie.cyl_head >> 4)
                 };
@@ -261,10 +267,6 @@ impl AHDD {
                 self.partitions.push(part);
             }
             dbg!(&self.partitions);
-
-            self.raw = buf;
-            self.layout = layout;
-            self.checksum = self.checksum()?;
         } else {
             return Err(AHDDError::FhMut);
         }
@@ -277,16 +279,18 @@ impl AHDD {
     }
 
     pub fn checksum(&self) -> Result<u16, AHDDError> {
-        let mut c = Cursor::new(&self.raw[..]);
+        let c = Cursor::new(&self.raw[..]);
         let mut rr = ReverseReader::new(c);
 
+        if self.layout.partitions > 124 {
+            return Err(AHDDError::HeaderPartitionsCount(self.layout.partitions));
+        }
         rr.seek(SeekFrom::Start(BLOCK_SIZE as u64))?;
         let mut br = ByteOrdered::le(&mut rr);
         let mut cs = AHDD_CS_INIT;
         for _ in 0..(AHDD_HEADER_WORDS + self.layout.partitions as usize * 2) {
             cs = cs.wrapping_add(br.read_u16()?);
         }
-        dbg!(&self.layout.checksum, &cs);
         if self.layout.checksum != cs {
             return Err(AHDDError::CheckSum(self.layout.checksum, cs));
         }
@@ -336,6 +340,8 @@ pub const SHHD_ADR_PAR_W: usize = 4;
 /// состояние регистра страниц
 pub const SHDD_PAGE_W: usize = 5;
 
+pub const HDI_MAGIC_OFFSET: usize = 510;
+pub const HDI_MAGIC: u8 = 0xa5;
 /// HDI layout
 #[binrw]
 #[brw(little)]
@@ -463,7 +469,13 @@ impl Default for HDILayout {
 /// Main HDI Struct
 pub struct HDI {
     file_name: String,
+    reader: Option<fs::File>,
+    read_only: bool,
     meta: HDILayout,
+    is_hdi: bool,
+    ahdd: AHDD,
+    is_ahdd: bool,
+    is_shdd: bool,
     raw: [u8; BLOCK_SIZE],
 }
 
@@ -471,15 +483,118 @@ impl Default for HDI {
     fn default() -> Self {
         Self {
             file_name: Default::default(),
+            reader: None,
+            read_only: true,
             meta: HDILayout::default(),
+            is_hdi: false,
+            ahdd: AHDD::default(),
+            is_ahdd: false,
+            is_shdd: false,
             raw: [0u8; BLOCK_SIZE],
         }
     }
 }
 
+#[derive(Error, Debug)]
+pub enum HDIError {
+    #[error("Can't get fh as mut")]
+    FhMut,
+    #[error("Can't get fh ref")]
+    FhRef,
+    #[error("File name is not set")]
+    EmptyName,
+    #[error("Header read error size {} != {0}", BLOCK_SIZE)]
+    ReadHeaderSize(usize),
+    #[error("Header checksum error {0} != {1}")]
+    CheckSum(u8, u8),
+    #[error("HDI Magic not found")]
+    Magic,
+    #[error("Unknown format")]
+    UnknownFormat,
+    #[error("Io Error")] //
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+    #[error("AHDD Error")] //
+    AHDD {
+        #[from]
+        source: AHDDError,
+    },
+    #[error("BinRW Error")]
+    BinRW {
+        #[from]
+        source: binrw::Error,
+    },
+    #[error("Uknown Error")]
+    Unknown,
+}
+
 impl HDI {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(fname: &str) -> Self {
+        Self {
+            file_name: String::from(fname),
+            read_only: true,
+            ahdd: AHDD::new(fname),
+            ..Default::default()
+        }
+    }
+
+    pub fn try_open(&mut self) -> Result<(), HDIError> {
+        if self.file_name.is_empty() {
+            return Err(HDIError::EmptyName);
+        }
+        let fh = OpenOptions::new()
+            .read(true)
+            .write(!self.read_only)
+            .append(false)
+            .truncate(false)
+            .open(Path::new(&self.file_name))?;
+        self.reader = Some(fh);
+        self.read_header()?;
+        Ok(())
+    }
+
+    fn read_header(&mut self) -> Result<(), HDIError> {
+        if let Some(reader) = self.reader.as_mut() {
+            reader.seek(SeekFrom::Start(0))?;
+            let size = reader.read(&mut self.raw[..])?;
+            if size != BLOCK_SIZE {
+                return Err(HDIError::ReadHeaderSize(size));
+            }
+            if self.raw[HDI_MAGIC_OFFSET] == HDI_MAGIC {
+                let mut c = Cursor::new(&self.raw[..]);
+                self.meta = HDILayout::read(&mut c)?;
+                if self.checksum() == self.meta.checksum {
+                    self.is_hdi = true;
+                }
+            }
+            if self.is_hdi {
+                self.ahdd.set_offset(BLOCK_SIZE as u64);
+            }
+            let res = self.ahdd.read_header();
+            match res {
+                Err(AHDDError::Io { .. }) => res?,
+                Err(_) => self.is_ahdd = false,
+                _ => self.is_ahdd = true,
+            }
+            if !self.is_ahdd && !self.is_shdd {
+                return Err(HDIError::UnknownFormat);
+            }
+        } else {
+            // need to reopen
+            return Err(HDIError::FhMut);
+        }
+
+        Ok(())
+    }
+
+    pub fn partitions(&self) -> Vec<&Partition> {
+        if self.is_ahdd {
+            self.ahdd.partitions.iter().collect()
+        } else {
+            Vec::with_capacity(0)
+        }
     }
 
     pub fn checksum(&self) -> u8 {
