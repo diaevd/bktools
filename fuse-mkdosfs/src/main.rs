@@ -52,14 +52,27 @@ fn main() -> Result<()> {
                 .long("offset")
                 .alias("base")
                 .short("o")
-                .default_value("0")
                 .takes_value(true)
+                .requires("size")
                 .validator(|s| match s.parse::<u64>() {
                     Ok(_n) => Ok(()),
                     Err(e) => Err(format!("valuse must an integer: {}", e)),
                 })
                 .value_name("OFFSET")
                 .help("Offset from start of image in blocks"),
+        )
+        .arg(
+            Arg::with_name("size")
+                .long("size")
+                .short("s")
+                .requires("offset")
+                .takes_value(true)
+                .validator(|s| match s.parse::<u64>() {
+                    Ok(_n) => Ok(()),
+                    Err(e) => Err(format!("valuse must an integer: {}", e)),
+                })
+                .value_name("SIZE")
+                .help("Size of image in blocks"),
         )
         .arg(
             Arg::with_name("inverted")
@@ -92,9 +105,12 @@ fn main() -> Result<()> {
     if matches.is_present("inverted") {
         fs.set_inverted(true);
     }
+
     if matches.is_present("offset") {
         let offset = matches.value_of("offset").unwrap().parse::<u64>()?;
         fs.set_offset(offset);
+        let size = matches.value_of("size").unwrap().parse::<u64>()?;
+        fs.set_size(size);
     }
 
     info!("Starting");

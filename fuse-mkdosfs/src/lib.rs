@@ -66,6 +66,8 @@ pub struct FuseFs {
     inverted: bool,
     /// Offset from start of image in blocks
     offset: u64,
+    /// Size of image in blocks
+    size: u64,
     ///
     fs: Fs,
     _tracing_span: tracing::Span,
@@ -82,6 +84,7 @@ impl Default for FuseFs {
             show_deleted: false,
             inverted: false,
             offset: 0,
+            size: 0,
             fs: Fs::default(),
         }
     }
@@ -120,6 +123,12 @@ impl FuseFs {
     pub fn set_offset(&mut self, offset: u64) {
         self.offset = offset;
         self.fs.set_offset_blocks(offset);
+    }
+
+    /// Set the fuse fs's offset.
+    pub fn set_size(&mut self, size: u64) {
+        self.size = size;
+        self.fs.set_size_blocks(size);
     }
 }
 
