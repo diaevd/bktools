@@ -152,7 +152,7 @@ impl Filesystem for FuseFs {
         if let Some(entry) = self.fs.find_entrie(name.to_str().unwrap(), parent) {
             let fattr = FileAttr {
                 ino: entry.inode,
-                size: entry.length as u64,
+                size: entry.size as u64,
                 blocks: entry.blocks,
                 atime: datetime!(1979-01-29 03:00 UTC).into(),
                 mtime: datetime!(1979-01-29 03:00 UTC).into(),
@@ -191,7 +191,7 @@ impl Filesystem for FuseFs {
         else if let Some(entry) = self.fs.entrie_by_inode(ino) {
             let fattr = FileAttr {
                 ino,
-                size: entry.length as u64,
+                size: entry.size as u64,
                 blocks: entry.blocks,
                 atime: datetime!(1979-01-29 03:00 UTC).into(),
                 mtime: datetime!(1979-01-29 03:00 UTC).into(),
@@ -358,7 +358,7 @@ impl Filesystem for FuseFs {
         // dbg!(ino, fh, offset, size, flags);
 
         if let Some(entry) = self.fs.entrie_by_inode(ino) {
-            let file_size = entry.length as u64;
+            let file_size = entry.size as u64;
             // Could underflow if file length is less than local_start
             let read_size = std::cmp::min(size, file_size.saturating_sub(offset as u64) as u32);
             // Move this to mkfdosfs::Fs

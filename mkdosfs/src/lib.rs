@@ -176,6 +176,8 @@ pub struct DirEntry {
     pub start_address: u32,
     /// 26 - Длина.
     pub length: u32,
+    /// Реальный размер
+    pub size: u32,
     /// virtual inode
     /// 1..1000 - direcory inode
     /// 1000.. - other files
@@ -204,6 +206,7 @@ impl Debug for DirEntry {
             .field("blocks", &self.blocks)
             .field("start_address", &format_args!("{:o}", &self.start_address))
             .field("length", &self.length)
+            .field("size", &self.size)
             .field("inode", &self.inode)
             .field("parent_inode", &self.parent_inode)
             .field("is_dir", &self.is_dir)
@@ -235,6 +238,7 @@ impl Default for DirEntry {
             blocks: 0,
             start_address: 0,
             length: 0,
+            size: 0,
             inode: 0,
             parent_inode: 0,
             is_dir: false,
@@ -544,12 +548,17 @@ impl Fs {
                 dentry.start_block = start_block as u64;
                 dentry.blocks = blocks as u64;
                 dentry.start_address = start_address as u32;
+                dentry.length = length as u32;
                 // вот как здесь лучше с размером пуступить пока не знаю
                 // сделаем просто
-                if blocks > (u16::MAX as usize / BLOCK_SIZE) as u16 {
-                    dentry.length = (blocks as usize * BLOCK_SIZE) as u32;
+                // по хорошему, если размер в блоках > 128
+                // то размер должен расчитывать как blocks * 512 + length
+                // при этом в length должна быть < 512
+                // но этого вроде нет, поэтому так
+                if blocks > (u16::MAX as usize / BLOCK_SIZE + 1) as u16 {
+                    dentry.size = blocks as u32 * BLOCK_SIZE as u32;
                 } else {
-                    dentry.length = length as u32;
+                    dentry.size = length as u32;
                 }
 
                 if is_directory {
