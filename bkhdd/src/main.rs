@@ -1,17 +1,9 @@
-use binrw::BinRead;
-use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg};
+use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg, SubCommand};
 use color_eyre::eyre::Result;
-use std::{
-    fs,
-    io::{Cursor, Read, Seek, SeekFrom, Write},
-};
-use tracing::info;
+// use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use bkhdd::{
-    io::{BinInvertedReader, ReverseReader},
-    AHDDLayout, HDILayout, AHDD, AHDD_CYL_B, AHDD_LOGD_B, AHDD_PT_SEC, BLOCK_SIZE, HDI,
-};
+use bkhdd::HDI;
 
 fn main() -> Result<()> {
     setup_logging()?;
@@ -19,43 +11,65 @@ fn main() -> Result<()> {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
-        .setting(AppSettings::ColoredHelp)
-        // .subcommand(subcmd)
-        .arg(
-            Arg::with_name("IMAGE_NAME")
-                .required(true)
-                .index(1)
-                .help("HDD image file path"),
+        .global_setting(AppSettings::ColoredHelp)
+        .setting(AppSettings::SubcommandRequiredElseHelp)
+        .setting(AppSettings::DeriveDisplayOrder)
+        .subcommand(
+            SubCommand::with_name("info")
+                .alias("show")
+                .about("Disk image information")
+                .arg(
+                    Arg::with_name("IMAGE_NAME")
+                        .required(true)
+                        .help("Disk image file path"),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("list")
+                .alias("ls")
+                .about("Partitions list")
+                .arg(
+                    Arg::with_name("IMAGE_NAME")
+                        .required(true)
+                        .help("Disk image file path"),
+                ),
         )
         .get_matches();
+    // dbg!(&matches);
 
-    info!("Starting");
+    let cmd = matches.subcommand_name().unwrap();
+    let image_name = matches
+        .subcommand_matches(cmd)
+        .unwrap()
+        .value_of("IMAGE_NAME")
+        .unwrap();
 
-    let image_name = matches.value_of("IMAGE_NAME").unwrap();
+    // dbg!(&cmd, &image_name);
 
     let mut hdi = HDI::new(image_name);
     hdi.try_open()?;
 
-    let part = hdi.partitions()[0];
-    let pos = part.lba;
-    dbg!(&pos);
-
-    // let offset = BLOCK_SIZE as u64 + (pos as u64 * BLOCK_SIZE as u64);
-    // let pos = f.seek(SeekFrom::Start(offset))?;
-    // dbg!(&pos);
-
-    // let mut buf = [0u8; BLOCK_SIZE];
-    // let mut reader = BinInvertedReader::new(f);
-    // let size = reader.read(&mut buf)?;
-    // assert_eq!(size, BLOCK_SIZE);
-    // let mut w = fs::OpenOptions::new()
-    //     .create(true)
-    //     .truncate(true)
-    //     .write(true)
-    //     .append(false)
-    //     .open("test_block.dump")?;
-    // w.write(&buf[..])?;
-    // w.flush()?;
+    match cmd {
+        "info" => {
+            if hdi.is_hdi {
+                println!("HDI Info:");
+                let info = hdi.info();
+                println!(
+                    "\tC/H/S: {}/{}/{} Version: {}",
+                    info.cylinders, info.heads, info.sectors, info.fw_version
+                );
+                println!(
+                    "\tName: \"{}\" Serial: \"{}\"",
+                    info.model_name, info.serial_number
+                );
+            }
+            print!("Controller: ");
+            if hdi.is_ahdd {
+                println!("AltPro. Info:");
+            }
+        }
+        _ => unreachable!(),
+    }
 
     Ok(())
 }

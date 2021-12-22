@@ -401,6 +401,7 @@ impl Filesystem for FuseFs {
         reply.error(ENOSYS);
     }
 
+    #[instrument(level = "trace", skip(self, _req, reply))]
     fn release(
         &mut self,
         _req: &Request<'_>,
@@ -411,6 +412,7 @@ impl Filesystem for FuseFs {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
+        // dbg!(&_ino, &_fh);
         reply.ok();
     }
 
