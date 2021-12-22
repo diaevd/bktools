@@ -266,7 +266,7 @@ impl AHDD {
 
                 self.partitions.push(part);
             }
-            dbg!(&self.partitions);
+            // dbg!(&self.partitions);
         } else {
             return Err(AHDDError::FhMut);
         }
@@ -375,8 +375,6 @@ pub struct HDILayout {
 
 impl std::fmt::Debug for HDILayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::ffi::CStr;
-
         f.debug_struct("HDILayout")
             .field("main_config", &format_args!("{:x}", &self.main_config))
             .field("cylinders", &self.cylinders)
@@ -472,10 +470,10 @@ pub struct HDI {
     reader: Option<fs::File>,
     read_only: bool,
     meta: HDILayout,
-    is_hdi: bool,
+    pub is_hdi: bool,
     ahdd: AHDD,
-    is_ahdd: bool,
-    is_shdd: bool,
+    pub is_ahdd: bool,
+    pub is_shdd: bool,
     raw: [u8; BLOCK_SIZE],
 }
 
@@ -493,6 +491,16 @@ impl Default for HDI {
             raw: [0u8; BLOCK_SIZE],
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub struct HDIInfo {
+    pub cylinders: u16,
+    pub heads: u16,
+    pub sectors: u16,
+    pub serial_number: String,
+    pub fw_version: String,
+    pub model_name: String,
 }
 
 #[derive(Error, Debug)]
@@ -537,6 +545,24 @@ impl HDI {
             read_only: true,
             ahdd: AHDD::new(fname),
             ..Default::default()
+        }
+    }
+
+    pub fn info(&self) -> HDIInfo {
+        let meta = &self.meta;
+        HDIInfo {
+            cylinders: meta.cylinders,
+            heads: meta.heads,
+            sectors: meta.sectors,
+            serial_number: String::from_utf8_lossy(&swap_pairs(&meta.serial_number))
+                .trim_end()
+                .to_string(),
+            fw_version: String::from_utf8_lossy(&swap_pairs(&meta.fw_version))
+                .trim_end()
+                .to_string(),
+            model_name: String::from_utf8_lossy(&swap_pairs(&meta.model_name))
+                .trim_end()
+                .to_string(),
         }
     }
 
