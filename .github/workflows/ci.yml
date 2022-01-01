@@ -17,7 +17,9 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        fail-fast: false
+        os: [ubuntu-latest, macos-latest]
+        # target: []
 
     runs-on: ${{ matrix.os }}
 
@@ -35,7 +37,21 @@ jobs:
       #   run: |
       #     echo Add other actions to build,
       #     echo test, and deploy your project.
-      - name: Stable
+
+      - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+      # for macos we need fuse library
+      - name: Install fuse
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update > /dev/null && brew install --cask macfuse
+
+      - name: Check build
         run: cargo check
 
       - name: Clippy
@@ -47,7 +63,18 @@ jobs:
     runs-on: macos-11
     steps:
       - uses: actions/checkout@v2
-      - name: Install target
-        run: rustup update && rustup target add aarch64-apple-darwin
+
+      - name: Install Rust toolchain
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        target: aarch64-apple-darwin
+        override: true
+
+      - name: Install fuse
+        run: |
+          brew update > /dev/null && brew install --cask macfuse
+
       - name: Check build
         run: cargo check --target=aarch64-apple-darwin
