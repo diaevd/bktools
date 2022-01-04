@@ -1,6 +1,6 @@
 //#![feature(destructuring_assignment)]
 
-use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg};
+use clap::{crate_authors, crate_name, crate_version, App, Arg};
 use color_eyre::eyre::Result;
 use fuser::MountOption;
 use tracing::info;
@@ -14,44 +14,43 @@ fn main() -> Result<()> {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
-        .setting(AppSettings::ColoredHelp)
         .arg(
-            Arg::with_name("IMAGE_NAME")
+            Arg::new("IMAGE_NAME")
                 .required(true)
                 .index(1)
                 .help("MKDOS disk image file path"),
         )
         .arg(
-            Arg::with_name("MOUNT_POINT")
+            Arg::new("MOUNT_POINT")
                 .required(true)
                 .index(2)
                 .help("Mount image at given path"),
         )
         .arg(
-            Arg::with_name("auto-unmount")
+            Arg::new("auto-unmount")
                 .long("auto-unmount")
                 .help("Automatically unmount on process exit"),
         )
         .arg(
-            Arg::with_name("allow-root")
+            Arg::new("allow-root")
                 .long("allow-root")
                 .help("Allow root user to access filesystem"),
         )
         .arg(
-            Arg::with_name("show-bad")
+            Arg::new("show-bad")
                 .long("show-bad")
                 .help("Enable show bad files (areas marked as bad blocks)"),
         )
         .arg(
-            Arg::with_name("show-deleted")
+            Arg::new("show-deleted")
                 .long("show-deleted")
                 .help("Enable show deleted files (files marked as deleted)"),
         )
         .arg(
-            Arg::with_name("offset")
+            Arg::new("offset")
                 .long("offset")
                 .alias("base")
-                .short("o")
+                .short('o')
                 .takes_value(true)
                 .requires("size")
                 .validator(|s| match s.parse::<u64>() {
@@ -62,9 +61,9 @@ fn main() -> Result<()> {
                 .help("Offset from start of image in blocks"),
         )
         .arg(
-            Arg::with_name("size")
+            Arg::new("size")
                 .long("size")
-                .short("s")
+                .short('s')
                 .requires("offset")
                 .takes_value(true)
                 .validator(|s| match s.parse::<u64>() {
@@ -75,9 +74,9 @@ fn main() -> Result<()> {
                 .help("Size of image in blocks"),
         )
         .arg(
-            Arg::with_name("inverted")
+            Arg::new("inverted")
                 .long("use-inverted")
-                .short("i")
+                .short('i')
                 .help("Use inverted reader (used to read hdd images images)"),
         )
         .get_matches();

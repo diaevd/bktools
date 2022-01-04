@@ -1,4 +1,4 @@
-name: CI
+name: MacOS-arm
 
 on:
   # Triggers the workflow on push or pull request events but only for the master branch
@@ -12,52 +12,36 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  MACOSX_DEPLOYMENT_TARGET: 10.15
   MACOS_ARM: 1
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  check-macos-arm:
+    runs-on: macos-10.15
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
-
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo $GITHUB_WORKSPACE
-
-      # # Runs a set of commands using the runners shell
-      # - name: Run a multi-line script
-      #   run: |
-      #     echo Add other actions to build,
-      #     echo test, and deploy your project.
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           profile: minimal
+          target: aarch64-apple-darwin
           override: true
 
-      - name: Install packages for ubuntu
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          # sudo apt update
-          sudo apt install -y libfuse-dev libfuse3-dev build-essential
-
-      # for macos we need fuse library
-      - name: Install packages for macos
-        if: matrix.os == 'macos-latest'
+      - name: Install fuse
+        shell: bash
         run: |
           brew update > /dev/null
           brew install --cask macfuse > /dev/null
           export PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          echo $PKG_CONFIG_PATH
+          which pkg-config
+
+  #     - name: Start fuse
+  #       run: |
+  #         /Library/Filesystems/macfuse.fs/Contents/Resources/load_macfuse
 
       - name: Cache cargo registry
         uses: actions/cache@v1
@@ -70,10 +54,10 @@ jobs:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check build
-        run: cargo check
-
-      - name: Clippy
-        run: |
-          rustup component add clippy
-          cargo clippy --all-targets
+      - name: Cargo build
+        uses: actions-rs/cargo@v1
+        with:
+          toolchain: stable
+          use-cross: false
+          command: check
+          args: --release --no-default-features --target aarch64-apple-darwin

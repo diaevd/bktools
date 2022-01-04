@@ -1,4 +1,4 @@
-use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg, SubCommand};
+use clap::{crate_authors, crate_name, crate_version, App, AppSettings, Arg};
 use color_eyre::eyre::Result;
 // use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -11,28 +11,24 @@ fn main() -> Result<()> {
     let matches = App::new(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
-        .global_setting(AppSettings::ColoredHelp)
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .setting(AppSettings::DeriveDisplayOrder)
         .subcommand(
-            SubCommand::with_name("info")
+            App::new("info")
                 .alias("show")
                 .about("Disk image information")
                 .arg(
-                    Arg::with_name("IMAGE_NAME")
+                    Arg::new("IMAGE_NAME")
                         .required(true)
                         .help("Disk image file path"),
                 ),
         )
         .subcommand(
-            SubCommand::with_name("list")
-                .alias("ls")
-                .about("Partitions list")
-                .arg(
-                    Arg::with_name("IMAGE_NAME")
-                        .required(true)
-                        .help("Disk image file path"),
-                ),
+            App::new("list").alias("ls").about("Partitions list").arg(
+                Arg::new("IMAGE_NAME")
+                    .required(true)
+                    .help("Disk image file path"),
+            ),
         )
         .get_matches();
     // dbg!(&matches);

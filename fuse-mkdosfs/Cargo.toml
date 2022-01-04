@@ -15,15 +15,15 @@ doctest = false
 
 [dependencies]
 mkdosfs = { path = "../mkdosfs", version = "0.2" }
-clap = "2.33.3"
+clap = { version = "3.0.0", features = [ "cargo" ] }
 color-eyre = "0.5.11"
 eyre = "0.6.5"
 fuser = "0.9.1"
-libc = "0.2.107"
+libc = "0.2.112"
 thiserror = "1.0.30"
 time = { version = "0.3.5", features = [ "macros" ] }
 tracing = "0.1.29"
-tracing-subscriber = { version = "0.3.1", features = [ "env-filter" ] }
+tracing-subscriber = { version = "0.3.5", features = [ "env-filter" ] }
 
 #[profile.dev.package.backtrace]
 #opt-level = 3
