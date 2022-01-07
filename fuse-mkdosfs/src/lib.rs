@@ -149,15 +149,16 @@ impl Filesystem for FuseFs {
         use fuser::FileAttr;
 
         // dbg!("LOOKUP: ", parent, name);
+        let last_modified = self.fs.last_modified();
         if let Some(entry) = self.fs.find_entrie(name.to_str().unwrap(), parent) {
             let fattr = FileAttr {
                 ino: entry.inode,
                 size: entry.size as u64,
                 blocks: entry.blocks,
-                atime: datetime!(1979-01-29 03:00 UTC).into(),
-                mtime: datetime!(1979-01-29 03:00 UTC).into(),
-                ctime: datetime!(1979-01-29 03:00 UTC).into(),
-                crtime: datetime!(1979-01-29 03:00 UTC).into(),
+                atime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                mtime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                ctime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                crtime: last_modified, // datetime!(1979-01-29 03:00 UTC).into(),
                 kind: from_direntry_status(entry.status),
                 perm: entry.mode,
                 nlink: 1,
@@ -179,6 +180,7 @@ impl Filesystem for FuseFs {
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, reply: ReplyAttr) {
         use fuser::FileAttr;
         // 1 => _
+        let last_modified = self.fs.last_modified();
         if ino == 1 {
             let mut dattr = ROOT_DIR_ATTR;
             dattr.atime = datetime!(1979-01-29 03:00 UTC).into(); //systime_from_secs(ED_UNIX_TIME);
@@ -193,10 +195,10 @@ impl Filesystem for FuseFs {
                 ino,
                 size: entry.size as u64,
                 blocks: entry.blocks,
-                atime: datetime!(1979-01-29 03:00 UTC).into(),
-                mtime: datetime!(1979-01-29 03:00 UTC).into(),
-                ctime: datetime!(1979-01-29 03:00 UTC).into(),
-                crtime: datetime!(1979-01-29 03:00 UTC).into(),
+                atime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                mtime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                ctime: last_modified,  // datetime!(1979-01-29 03:00 UTC).into(),
+                crtime: last_modified, // datetime!(1979-01-29 03:00 UTC).into(),
                 kind: from_direntry_status(entry.status),
                 perm: entry.mode,
                 nlink: 1,
@@ -516,9 +518,7 @@ impl Filesystem for FuseFs {
             .fs
             .entries_by_parent_inode(ino)
             .iter()
-            .filter(|&e|
-                        // !(!self.show_deleted && e.is_deleted) && !(!self.show_bad && e.is_bad))
-                        (!e.is_deleted || self.show_deleted) && (!e.is_bad || self.show_bad))
+            .filter(|&e| (!e.is_deleted || self.show_deleted) && (!e.is_bad || self.show_bad))
             .skip((offset - 2) as usize)
             .enumerate()
         {

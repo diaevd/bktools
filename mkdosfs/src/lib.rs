@@ -5,6 +5,7 @@ use std::{
     os::unix::fs::MetadataExt,
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
+    time::SystemTime,
 };
 
 use bytes::Buf;
@@ -266,6 +267,7 @@ pub struct Fs {
     offset: u64,
     size: u64,
     inverted: bool,
+    last_modified: SystemTime,
     /// image meta block
     meta: Meta,
     /// directory inodes
@@ -308,6 +310,7 @@ impl Default for Fs {
             offset: 0,
             size: 0,
             inverted: false,
+            last_modified: SystemTime::UNIX_EPOCH,
             meta: Meta::new(),
             dir_inodes: AtomicU64::new(2),
             file_inodes: AtomicU64::new(1001),
@@ -371,6 +374,7 @@ impl Fs {
             }
             let m = h.metadata()?;
             self.size = m.blocks() * BLOCK_SIZE as u64;
+            self.last_modified = m.modified()?;
         }
         let reader = if self.inverted {
             Reader::inverted(h)
@@ -620,7 +624,59 @@ impl Fs {
         Ok(())
     }
 
-    pub fn entries_by_parent_inode(&self, parent_ino: u64) -> Vec<DirEntry> {
+    pub fn try_reopen(&mut self) -> Result<(), FsError> {
+        self.dir_inodes = AtomicU64::new(2);
+        self.file_inodes = AtomicU64::new(1001);
+        self.size = 0;
+        self.meta = Meta::new();
+        self.entries = Vec::new();
+        // TODO: закрыть все открытые файлы
+        // но потом надо будет сделать умное закрытие
+        self.try_open()
+    }
+
+    pub fn last_modified(&self) -> SystemTime {
+        self.last_modified.clone()
+    }
+
+    pub fn check_modified(&mut self) -> bool {
+        let modified = if let Some(reader) = self.reader.as_ref() {
+            let inner = reader.as_ref();
+            if let Ok(m) = inner.metadata() {
+                match m.modified() {
+                    Ok(mt) => {
+                        if mt != self.last_modified {
+                            warn!(parent: &self._tracing_span, "Disk modified {:?} -> {:?}", self.last_modified, mt);
+                            self.last_modified = mt;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        } else {
+            todo!()
+        };
+        if modified {
+            match self.try_reopen() {
+                Ok(_) => {
+                    warn!(parent: &self._tracing_span, "Try to reopen");
+                    true
+                }
+                // TODO: закрываем все нахрен и вываливаемся с ошибкой
+                Err(_) => panic!("Can't reopen"),
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn entries_by_parent_inode(&mut self, parent_ino: u64) -> Vec<DirEntry> {
+        let _ = self.check_modified();
         self.entries
             .iter()
             .filter(|&entry| entry.parent_inode == parent_ino)
@@ -633,7 +689,8 @@ impl Fs {
     /// понятно что для mkdos это нафиг не надо ибо подкаталоги
     /// просто для красоты, но если будем маскировать логические диски
     /// под каталоги, то надо будет именно так
-    pub fn find_entrie(&self, name: &str, parent_inode: u64) -> Option<&DirEntry> {
+    pub fn find_entrie(&mut self, name: &str, parent_inode: u64) -> Option<&DirEntry> {
+        let _ = self.check_modified();
         self.entries
             .iter()
             .find(|&entry| entry.parent_inode == parent_inode && entry.name == name)
@@ -648,7 +705,8 @@ impl Fs {
         }
     }
 
-    pub fn entrie_by_inode(&self, inode: u64) -> Option<&DirEntry> {
+    pub fn entrie_by_inode(&mut self, inode: u64) -> Option<&DirEntry> {
+        let _ = self.check_modified();
         self.entries.iter().find(|&entry| entry.inode == inode)
     }
 
