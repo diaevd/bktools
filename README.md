@@ -21,6 +21,10 @@ Just read [README](./README.ru.md) on russian. Because BKTools developed for rus
 
 ## Quick Links
 
+## Sponsorships
+
+Who want's to donate for beer just send me say me ;)
+
 ## License
 
 BKTools is primarily distributed under the terms of both the MIT
