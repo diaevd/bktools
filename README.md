@@ -23,7 +23,7 @@ Just read [README](./README.ru.md) on russian. Because BKTools developed for rus
 
 ## Sponsorships
 
-Who want's to donate for beer just send me say me ;)
+Who want's to donate for beer just say me ;)
 
 ## License
 
