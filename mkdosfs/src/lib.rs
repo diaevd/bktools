@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fmt::Debug,
     fs::{File, OpenOptions},
     io::{Read, Seek, SeekFrom},
@@ -436,6 +437,7 @@ impl Fs {
 
     #[instrument(level = "trace", skip(self))]
     fn read_entries(&mut self) -> Result<(), FsError> {
+        let tspan = self._tracing_span.clone();
         let mut cur_pos = MetaOffset::DirEntriesStart as u64 + self.offset;
         let mut count_all = 0;
         let mut count_normal = 0;
@@ -445,6 +447,7 @@ impl Fs {
         let mut used_blocks = 0;
         let mut bad_blocks = 0;
         let mut hole_blocks = 0;
+        let mut exists_dir_ino = HashSet::from([1u64]);
         if let Some(reader) = self.reader.as_mut() {
             let _pos = reader.seek(SeekFrom::Start(cur_pos as u64))?;
             // dbg!(&pos);
@@ -525,10 +528,11 @@ impl Fs {
                                 || start_block >= self.meta.disk_size
                                 || blocks > self.meta.disk_size - self.meta.blocks
                             {
+                                dbg!(&name);
                                 break;
                             }
 
-                            warn!(parent: &self._tracing_span, "Uknown Status: 0{:o}", n);
+                            warn!(parent: &tspan, "Uknown Status: 0{:o}", n);
                             dentry.is_unknown = true;
                             Normal
                         }
@@ -540,7 +544,10 @@ impl Fs {
                 let name_off = if is_directory { &name[1..] } else { &name };
                 let (cow, _encoding_used, had_errors) = KOI8_R.decode(name_off);
                 if had_errors {
-                    warn!(parent: &self._tracing_span, "Error while recoding file name {:?}", name_off);
+                    warn!(
+                        parent: &tspan,
+                        "Error while recoding file name {:?}", name_off
+                    );
                 }
 
                 dentry.status = status;
@@ -549,6 +556,7 @@ impl Fs {
                 // привязываем его к нашим виртуальным инодам, поэтому + 1
                 dentry.parent_inode = 1 + dir_no as u64;
                 dentry.name = String::from(cow.trim_end());
+                // dbg!(&dentry.name);
                 dentry.start_block = start_block as u64;
                 dentry.blocks = blocks as u64;
                 dentry.start_address = start_address as u32;
@@ -569,6 +577,7 @@ impl Fs {
                     // dentry.inode = self.dir_inodes.fetch_add(1, Ordering::SeqCst)
                     // Изврат, МКТ в курсе :-D
                     dentry.inode = 1 + f_status as u64;
+                    exists_dir_ino.insert(dentry.inode);
                     dentry.mode = 0o755;
                 } else {
                     dentry.inode = self.file_inodes.fetch_add(1, Ordering::SeqCst)
@@ -585,13 +594,14 @@ impl Fs {
                     dentry.parent_inode = 1;
                 }
                 if dentry.is_unknown {
-                    warn!(parent: &self._tracing_span,
-                          "File with unknown status {:?}", dentry);
+                    warn!(parent: &tspan, "File with unknown status {:?}", dentry);
                 }
                 self.entries.push(dentry);
 
                 cur_pos += DIR_ENTRY_SIZE as u64;
-                if cur_pos > start_block as u64 * BLOCK_SIZE as u64 + self.offset {
+                if cur_pos > self.meta.start_block as u64 * BLOCK_SIZE as u64 + self.offset {
+                    dbg!(&cur_pos, &start_block, &self.offset);
+                    dbg!(&self.entries[self.entries.len() - 1]);
                     break;
                 }
             }
@@ -599,6 +609,25 @@ impl Fs {
             todo!("Need to Reopen");
             // Ok(())
         }
+
+        // А теперь проверим для всех ли файлов существуют фолдеры
+        // и если какого-то каталога тупо нет, то кидаем такой файл в корень
+        let mut count_orphan_files = 0;
+        for mut ent in self.entries.iter_mut() {
+            if !exists_dir_ino.contains(&ent.parent_inode) {
+                count_orphan_files += 1;
+                dbg!(&ent.name, &ent.parent_inode);
+                // хз че за хрень, но нам подсунули сиротку, кидаем в корень
+                ent.parent_inode = 1;
+            }
+        }
+        if count_orphan_files != 0 {
+            warn!(parent: &self._tracing_span,
+                  "{} orphan files found",
+                  count_orphan_files
+            );
+        }
+
         // trace!(parent: &self._tracing_span, "ENTRIES: {:#?}", self.entries);
         debug!(parent: &self._tracing_span,
             count_normal, count_deleted, count_logical, count_bad, count_all, "ENTRIES:"
@@ -627,7 +656,11 @@ impl Fs {
     pub fn try_reopen(&mut self) -> Result<(), FsError> {
         self.dir_inodes = AtomicU64::new(2);
         self.file_inodes = AtomicU64::new(1001);
-        self.size = 0;
+        // Нельзя обнулять размер, если работаем по смещению
+        // смещение всегда указывается жестким размером
+        if self.offset == 0 {
+            self.size = 0;
+        }
         self.meta = Meta::new();
         self.entries = Vec::new();
         // TODO: закрыть все открытые файлы
@@ -646,9 +679,17 @@ impl Fs {
                 match m.modified() {
                     Ok(mt) => {
                         if mt != self.last_modified {
-                            warn!(parent: &self._tracing_span, "Disk modified {:?} -> {:?}", self.last_modified, mt);
-                            self.last_modified = mt;
-                            true
+                            // нам не надо два раза переоткрывать образ
+                            // да да, затычка, как и весь check modfidied на
+                            // данный момент
+                            if self.last_modified != SystemTime::UNIX_EPOCH {
+                                warn!(parent: &self._tracing_span, "Disk modified {:?} -> {:?}", self.last_modified, mt);
+                                self.last_modified = mt;
+                                true
+                            } else {
+                                self.last_modified = mt;
+                                false
+                            }
                         } else {
                             false
                         }
@@ -668,7 +709,7 @@ impl Fs {
                     true
                 }
                 // TODO: закрываем все нахрен и вываливаемся с ошибкой
-                Err(_) => panic!("Can't reopen"),
+                Err(e) => panic!("Can't reopen: {:?}", e),
             }
         } else {
             false
@@ -691,6 +732,7 @@ impl Fs {
     /// под каталоги, то надо будет именно так
     pub fn find_entrie(&mut self, name: &str, parent_inode: u64) -> Option<&DirEntry> {
         let _ = self.check_modified();
+        // dbg!(&self, &name, &parent_inode);
         self.entries
             .iter()
             .find(|&entry| entry.parent_inode == parent_inode && entry.name == name)

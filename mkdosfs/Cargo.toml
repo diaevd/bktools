@@ -19,8 +19,8 @@ doctest = false
 
 [dependencies]
 bytes = "1.1.0"
-encoding_rs = "0.8.30"
-thiserror = "1.0.30"
-time = { version = "0.3.5", features = [ "macros" ] }
-tracing = "0.1.29"
-tracing-subscriber = { version = "0.3.5", features = [ "env-filter" ] }
+encoding_rs = "0.8.31"
+thiserror = "1.0.31"
+time = { version = "0.3.11", features = [ "macros" ] }
+tracing = "0.1.35"
+tracing-subscriber = { version = "0.3.14", features = [ "env-filter" ] }

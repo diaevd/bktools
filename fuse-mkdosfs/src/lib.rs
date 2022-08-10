@@ -16,7 +16,7 @@ use tracing::instrument;
 
 const ED_UNIX_TIME: u64 = 286405200;
 
-fn from_direntry_status(status: DirEntryStatus) -> FileType {
+pub fn from_direntry_status(status: DirEntryStatus) -> FileType {
     use DirEntryStatus::*;
 
     match status {
@@ -150,6 +150,7 @@ impl Filesystem for FuseFs {
 
         // dbg!("LOOKUP: ", parent, name);
         let last_modified = self.fs.last_modified();
+        // dbg!("LOOKUP: ", &last_modified);
         if let Some(entry) = self.fs.find_entrie(name.to_str().unwrap(), parent) {
             let fattr = FileAttr {
                 ino: entry.inode,

@@ -63,6 +63,8 @@ fn main() -> Result<()> {
             if hdi.is_ahdd {
                 println!("AltPro. Info:");
             }
+            let parts = hdi.partitions();
+            dbg!(parts);
         }
         _ => unreachable!(),
     }
